@@ -29,6 +29,16 @@ except ImportError:
     st.error("Errore: Modulo fit non trovato.")
 import io # Serve per scaricare i grafici
 
+try:
+    from funzioni_fisica.derivatenumeriche import calcola_velocita_indipendente, calcola_accelerazione_indipendente
+except ImportError:
+    st.error("Errore: Modulo derivatenumeriche non trovato.")
+
+try:
+    from funzioni_fisica.calibrazione import analizza_formula_calibrazione, esegui_calibrazione
+except ImportError:
+    st.error("Errore: Modulo calibrazione non trovato.")
+
 # endregion
 
 # region GESTIONE MODULI
@@ -45,7 +55,7 @@ def cambia_modulo(nome_modulo):
 # region --- SIDEBAR ---
 modulo = st.sidebar.radio(
     "Seleziona Modulo:", 
-    ["Home", "Statistica Base", "Istogrammi", "Generatore Misure", "Fit Lineare", "Media Pesata", "Propagazione Incertezze"],
+    ["Home", "Statistica Base", "Istogrammi", "Generatore Misure", "Fit Lineare", "Media Pesata", "Propagazione Incertezze", "Derivate Numeriche", "Calibrazione Dati"],
     key="modulo_scelto",
     label_visibility="collapsed"
 )
@@ -103,6 +113,18 @@ if modulo == "Home":
         st.success("### 🧮 Propagazione Incertezze")
         st.write("Calcolo della formula di propagazione a partire dalla definizione di una osservabile (ad esempio g), e risultato numerico.")
         st.button("Apri Propagazione", on_click=cambia_modulo, args=("Propagazione Incertezze",))
+
+    st.divider()
+
+    col7, col8 = st.columns(2)
+    with col7:
+        st.info("### 🎢 Derivate Numeriche")
+        st.write("Calcolo di velocità e accelerazione senza correlazione sui dati adiacenti (passi disgiunti).")
+        st.button("Apri Derivate", on_click=cambia_modulo, args=("Derivate Numeriche",))
+    with col8:
+        st.warning("### 🎛️ Calibrazione")
+        st.write("Applica funzioni di calibrazione (lineari, quadratiche, ecc.) ai dati grezzi dello strumento.")
+        st.button("Apri Calibrazione", on_click=cambia_modulo, args=("Calibrazione Dati",))
 
 elif modulo == "Statistica Base":
     st.title("📊 Statistica con Correzione Offset")
@@ -497,6 +519,127 @@ elif modulo == "Media Pesata":
                     st.error("Il numero di valori deve coincidere con il numero di incertezze.")
             except Exception as e:
                 st.error(f"Errore nel calcolo: {e}")
+
+elif modulo == "Derivate Numeriche":
+    st.title("🎢 Derivate Numeriche (Misure Indipendenti)")
+    st.markdown("""Calcolo di velocità (derivata prima) e accelerazione (derivata seconda) raggruppando i punti a 2 a 2 o a 3 a 3. 
+    In questo modo **non vengono introdotte correlazioni** (covarianze) tra i valori successivi.""")
+    
+    # --- NUOVA SEZIONE: Scelta del Delta T ---
+    usa_dt_fisso = st.toggle("Usa un intervallo di tempo $\\Delta t$ costante", value=False)
+    dt_val = None
+    
+    if usa_dt_fisso:
+        st.info("💡 **Modalità $\\Delta t$ costante attivata.** Verrà usata la formula semplificata $a = (x_3 - 2x_2 + x_1) / \\Delta t^2$. Non è necessario incollare la colonna dei tempi, li genererà l'app in automatico!")
+        dt_val = st.number_input("Inserisci il valore di $\\Delta t$ (secondi):", value=0.05, format="%.4f")
+    
+    st.subheader("Inserisci i dati grezzi")
+    col_t, col_x = st.columns(2)
+    with col_t:
+        # Se usa dt fisso, il box dei tempi diventa opzionale
+        ph_text = "Opzionale se usi Δt costante..." if usa_dt_fisso else "0.00\n0.05\n0.10\n0.15\n0.20\n0.25"
+        input_t = st.text_area("Tempi ($t$):", placeholder=ph_text, height=200)
+    with col_x:
+        input_x = st.text_area("Posizioni ($x$):", placeholder="0.01\n0.04\n0.09\n0.17\n0.24\n0.35", height=200)
+        
+    if st.button("🚀 Calcola Derivate", type="primary"):
+        if input_x:
+            try:
+                # La lista dei tempi può essere vuota se usa_dt_fisso è True
+                if input_t.strip():
+                    vt = np.array([float(v.replace(',', '.')) for v in input_t.split()])
+                else:
+                    vt = np.array([])
+                    
+                vx = np.array([float(v.replace(',', '.')) for v in input_x.split()])
+                
+                # Controllo coerenza
+                if not usa_dt_fisso and len(vt) != len(vx):
+                    st.error("Errore: Se non usi un $\\Delta t$ fisso, il numero di tempi deve coincidere con le posizioni!")
+                elif usa_dt_fisso and len(vt) > 0 and len(vt) != len(vx):
+                    st.warning("Hai inserito i tempi ma il loro numero non coincide con le posizioni. Il programma ignorerà i tempi inseriti e li genererà in automatico dal $\\Delta t$.")
+                    vt = np.array([]) # Svuota i tempi per forzare la generazione automatica
+                
+                # Se passa i controlli, esegui il calcolo!
+                if (usa_dt_fisso) or (not usa_dt_fisso and len(vt) == len(vx)):
+                    # Passiamo le variabili alle funzioni aggiornate
+                    t_v, v = calcola_velocita_indipendente(vx, t=vt, dt_fisso=dt_val)
+                    t_a, a = calcola_accelerazione_indipendente(vx, t=vt, dt_fisso=dt_val)
+                    
+                    st.divider()
+                    st.success(f"Calcolo completato su {len(vx)} posizioni grezze.")
+                    
+                    tab1, tab2 = st.tabs(["🚀 Velocità (Derivata Prima)", "🎢 Accelerazione (Derivata Seconda)"])
+                    
+                    with tab1:
+                        st.markdown(f"**Velocità ricavate:** {len(v)} misure indipendenti")
+                        col_v1, col_v2 = st.columns(2)
+                        with col_v1:
+                            t_v_text = "\n".join([f"{x:.4f}" for x in t_v])
+                            st.text_area("Tempi ($t_v$):", value=t_v_text, height=250, key="t_v_out")
+                        with col_v2:
+                            v_text = "\n".join([f"{x:.4f}" for x in v])
+                            st.text_area("Velocità ($v$):", value=v_text, height=250, key="v_out")
+                            
+                    with tab2:
+                        st.markdown(f"**Accelerazioni ricavate:** {len(a)} misure indipendenti")
+                        col_a1, col_a2 = st.columns(2)
+                        with col_a1:
+                            t_a_text = "\n".join([f"{x:.4f}" for x in t_a])
+                            st.text_area("Tempi ($t_a$):", value=t_a_text, height=250, key="t_a_out")
+                        with col_a2:
+                            a_text = "\n".join([f"{x:.4f}" for x in a])
+                            st.text_area("Accelerazioni ($a$):", value=a_text, height=250, key="a_out")
+            
+            except ValueError:
+                st.error("Errore: Assicurati di inserire solo numeri, uno per riga, usando il punto o la virgola per i decimali.")
+        else:
+            st.warning("Inserisci almeno i valori di posizione (x) per procedere.")
+
+elif modulo == "Calibrazione Dati":
+    st.title("🎛️ Calibrazione Dati Sperimentali")
+    st.write("Inserisci la funzione di calibrazione. Usa `x` per la misura grezza.")
+
+    formula_str = st.text_input("Funzione di calibrazione:", value="A*x + B")
+
+    if formula_str:
+        try:
+            # Chiamata alla funzione del modulo esterno
+            expr, x_sym, parametri = analizza_formula_calibrazione(formula_str)
+            
+            # Creazione dinamica degli input per i parametri
+            valori_parametri = {}
+            if parametri:
+                st.subheader("Parametri della formula")
+                cols = st.columns(len(parametri))
+                for i, p in enumerate(parametri):
+                    with cols[i]:
+                        val = st.number_input(f"Valore di {p.name}:", value=1.0, format="%.6f")
+                        valori_parametri[p] = val
+            
+            st.divider()
+            dati_input = st.text_area("Incolla qui le misure grezze (x):", height=150)
+            
+            if st.button("🚀 Applica Calibrazione", type="primary"):
+                if dati_input:
+                    # Parsing dati
+                    grezzi = np.array([float(v.replace(',', '.')) for v in dati_input.split()])
+                    
+                    # Chiamata alla logica di calcolo
+                    calibrati, expr_compilata = esegui_calibrazione(expr, x_sym, valori_parametri, grezzi)
+                    
+                    st.success("Calibrazione completata!")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.write("**Dati Originali**")
+                        st.text_area("Grezzi", value="\n".join([f"{v:.{decimali}f}" for v in grezzi]), height=300)
+                    with c2:
+                        st.write(f"**Dati Calibrati** (Formula: ${sp.latex(expr_compilata)}$)")
+                        st.text_area("Risultato", value="\n".join([f"{v:.{decimali}f}" for v in calibrati]), height=300)
+                else:
+                    st.warning("Inserisci i dati.")
+        except Exception as e:
+            st.error(f"Errore: {e}")
 
 # region Credits
 st.sidebar.markdown("---")
